@@ -1,73 +1,126 @@
+"use client";
+
+import { useState, useEffect } from "react";
 import { FlightCalendar } from "@/components/flight-calendar";
 
-const outboundPrices = {
-  "2024-12": [
-    { date: 13, price: 211 },
-    { date: 14, price: 153 },
-    { date: 15, price: 141 },
-    { date: 16, price: 211 },
-    { date: 17, price: 211 },
-    { date: 18, price: 179 },
-    { date: 19, price: 211 },
-    { date: 20, price: 263 },
-    { date: 21, price: 338 },
-    { date: 22, price: 283 },
-    { date: 23, price: 283 },
-    { date: 24, price: 246 },
-    { date: 25, price: 196 },
-    { date: 26, price: 246 },
-    { date: 27, price: 246 },
-    { date: 28, price: 212 },
-    { date: 29, price: 149 },
-    { date: 30, price: 149 },
-    { date: 31, price: 129 },
-  ],
-  "2025-01": [
-    { date: 1, price: 189 },
-    { date: 2, price: 199 },
-    { date: 3, price: 209 },
-    // Add more dates for January 2025
-  ],
-};
-
-const returnPrices = {
-  "2024-12": [
-    { date: 13, price: 125 },
-    { date: 14, price: 99 },
-    { date: 15, price: 99 },
-    { date: 16, price: 99 },
-    { date: 17, price: 88 },
-    { date: 18, price: 77 },
-    { date: 19, price: 68 },
-    { date: 20, price: 54 },
-    { date: 21, price: 68 },
-    { date: 22, price: 60 },
-    { date: 23, price: 60 },
-    { date: 24, price: 49 },
-    { date: 25, price: 49 },
-    { date: 26, price: 99 },
-    { date: 27, price: 89 },
-    { date: 28, price: 89 },
-    { date: 29, price: 155 },
-    { date: 30, price: 189 },
-    { date: 31, price: 172 },
-  ],
-  "2025-01": [
-    { date: 1, price: 179 },
-    { date: 2, price: 169 },
-    { date: 3, price: 159 },
-    // Add more dates for January 2025
-  ],
-};
+interface FlightData {
+  departure_date: string;
+  price: number;
+  carrier: string;
+}
 
 export default function Page() {
+  const [outboundFlights, setOutboundFlights] = useState<FlightData[]>([]);
+  const [returnFlights, setReturnFlights] = useState<FlightData[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  // Round up to nearest euro
+  const roundUpPrice = (price: number): number => {
+    return Math.ceil(price);
+  };
+
+  const transformFlightsToCalendarFormat = (flights: FlightData[]) => {
+    const pricesByMonth: Record<
+      string,
+      { date: number; price: number; type: "standard" | "lowest" | "special" }[]
+    > = {};
+
+    // First, group flights by month
+    flights.forEach((flight) => {
+      const date = new Date(flight.departure_date);
+      const monthKey = `${date.getFullYear()}-${(date.getMonth() + 1).toString().padStart(2, "0")}`;
+
+      if (!pricesByMonth[monthKey]) {
+        pricesByMonth[monthKey] = [];
+      }
+
+      pricesByMonth[monthKey].push({
+        date: date.getDate(),
+        price: roundUpPrice(flight.price), // Round up the price
+        type: "standard",
+      });
+    });
+
+    // Then determine lowest prices for each month
+    Object.keys(pricesByMonth).forEach((monthKey) => {
+      const monthFlights = pricesByMonth[monthKey];
+      const lowestPrice = Math.min(...monthFlights.map((f) => f.price));
+
+      // Mark the lowest price(s) in the month
+      monthFlights.forEach((flight) => {
+        if (flight.price === lowestPrice) {
+          flight.type = "lowest";
+        }
+      });
+    });
+
+    return pricesByMonth;
+  };
+
+  const fetchFlightData = async () => {
+    try {
+      // Fetch outbound flights
+      const outboundResponse = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL}/flights/cheapest-outbound`,
+      );
+      if (!outboundResponse.ok) {
+        throw new Error("Failed to fetch outbound flights");
+      }
+      const outboundData = await outboundResponse.json();
+
+      // Fetch return flights
+      const returnResponse = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL}/flights/cheapest-return`,
+      );
+      if (!returnResponse.ok) {
+        throw new Error("Failed to fetch return flights");
+      }
+      const returnData = await returnResponse.json();
+
+      setOutboundFlights(outboundData.data);
+      setReturnFlights(returnData.data);
+      setError(null);
+    } catch (err) {
+      console.error("Error fetching flight data:", err);
+      setError(err instanceof Error ? err.message : "An error occurred");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchFlightData();
+  }, []);
+
+  if (loading) {
+    return (
+      <div className="flex justify-center items-center min-h-screen">
+        Loading...
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex justify-center items-center min-h-screen text-red-500">
+        {error}
+      </div>
+    );
+  }
+
+  const outboundPrices = transformFlightsToCalendarFormat(outboundFlights);
+  const returnPrices = transformFlightsToCalendarFormat(returnFlights);
+
   return (
-    <div className="min-h-screen p-4 bg-white">
+    <div className="p-4">
       <FlightCalendar
-        initialMonth={11} // 0-indexed, so 11 is December
-        initialYear={2024}
+        initialMonth={new Date().getMonth()}
+        initialYear={new Date().getFullYear()}
         outboundPrices={outboundPrices}
         returnPrices={returnPrices}
+        onClose={() => console.log("Close clicked")}
+        onSearch={() => console.log("Search clicked")}
       />
     </div>
   );
